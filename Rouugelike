@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Mini Roguelike — Single File</title>
+  <style>
+    :root{--bg:#0b0f14;--tile:#0f1720;--player:#ffd166;--wall:#64748b;--floor:#0f1720;--enemy:#ef476f;--item:#06d6a0}
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,#071018 0%, #07101a 100%);font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#e6eef6}
+    .app{display:flex;gap:16px;height:100%;padding:18px;box-sizing:border-box}
+    .left{flex:0 0 auto}
+    canvas{background:var(--bg);image-rendering:pixelated;border-radius:8px;display:block}
+    .ui{flex:1;display:flex;flex-direction:column;gap:12px}
+    .panel{background:rgba(255,255,255,0.03);padding:12px;border-radius:8px;box-shadow:0 4px 18px rgba(0,0,0,0.5)}
+    h1{margin:0;font-size:18px}
+    pre{margin:0;font-family:monospace;font-size:13px}
+    .controls{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .controls button{padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:inherit}
+    .footer{margin-top:auto;font-size:13px;color:#9fb0c8}
+    .instructions{font-size:13px;color:#bcd3e6}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="left">
+      <canvas id="game" width="640" height="480"></canvas>
+    </div>
+    <div class="ui">
+      <div class="panel">
+        <h1>Mini Roguelike</h1>
+        <div class="instructions">Move: arrow keys / WASD. <strong>Turn-based</strong> — press a movement key to take your turn. Pick up items by moving onto them. Reach level 5 to win.</div>
+      </div>
+
+      <div id="stats" class="panel">
+        <pre id="statText">Loading...</pre>
+      </div>
+
+      <div id="log" class="panel" style="height:160px;overflow:auto">
+        <pre id="logText">Welcome to the mini roguelike!</pre>
+      </div>
+
+      <div class="panel controls">
+        <button id="newBtn">New Game</button>
+        <button id="seedBtn">Randomize Seed</button>
+        <button id="toggleFov">Toggle FOV</button>
+        <button id="saveBtn">Save (local)</button>
+      </div>
+
+      <div class="panel footer">A tiny procedural roguelike implemented in one HTML file. Source is editable — open this file in your browser.</div>
+    </div>
+  </div>
+
+<script>
+/* ----- CONFIG ----- */
+const TILE_SIZE = 16; // pixels
+const MAP_W = 40;
+const MAP_H = 30;
+const ROOM_MAX = 10;
+const ROOM_MIN_SIZE = 4;
+const ROOM_MAX_SIZE = 10;
+const MAX_ENEMIES = 10;
+const MAX_ITEMS = 8;
+
+/* ----- UTILS ----- */
+function randInt(a,b){return Math.floor(Math.random()*(b-a+1))+a}
+function shuffle(a){for(let i=a.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
+
+/* Simple seeded RNG so "Randomize Seed" and save/load reproducible maps work */
+class RNG{constructor(seed=Date.now()){this.seed=seed%2147483647; if(this.seed<=0) this.seed+=2147483646}
+  next(){this.seed = (this.seed * 48271) % 2147483647; return this.seed}
+  nextFloat(){return (this.next()-1)/2147483646}
+  nextInt(a,b){return Math.floor(this.nextFloat()*(b-a+1))+a}
+}
+
+/* ----- MAP GEN (rooms + corridors) ----- */
+function generateMap(rng){
+  const map = Array.from({length:MAP_H}, ()=>Array.from({length:MAP_W}, ()=>'#'));
+  const rooms = [];
+  for(let i=0;i<ROOM_MAX;i++){
+    const w = rng.nextInt(ROOM_MIN_SIZE, ROOM_MAX_SIZE);
+    const h = rng.nextInt(ROOM_MIN_SIZE, ROOM_MAX_SIZE);
+    const x = rng.nextInt(1, MAP_W - w - 2);
+    const y = rng.nextInt(1, MAP_H - h - 2);
+    const room = {x,y,w,h,center: [Math.floor(x+w/2), Math.floor(y+h/2)]};
+    let ok=true;
+    for(const r of rooms){ if(x < r.x + r.w + 1 && x + w + 1 > r.x && y < r.y + r.h + 1 && y + h + 1 > r.y){ok=false;break} }
+    if(!ok) continue;
+    // carve room
+    for(let yy=y;yy<y+h;yy++) for(let xx=x;xx<x+w;xx++) map[yy][xx]='.';
+    // connect
+    if(rooms.length>0){
+      const prevCenter = rooms[rooms.length-1].center;
+      const [cx,cy] = room.center;
+      if(rng.nextInt(0,1)==0){ // horizontal then vertical
+        carveCorridor(map, prevCenter[0], prevCenter[1], cx, prevCenter[1]);
+        carveCorridor(map, cx, prevCenter[1], cx, cy);
+      } else {
+        carveCorridor(map, prevCenter[0], prevCenter[1], prevCenter[0], cy);
+        carveCorridor(map, prevCenter[0], cy, cx, cy);
+      }
+    }
+    rooms.push(room);
+  }
+  return {map,rooms};
+}
+function carveCorridor(map,x1,y1,x2,y2){
+  let x=x1,y=y1;const dx=Math.sign(x2-x1), dy=Math.sign(y2-y1);
+  while(x!==x2 || y!==y2){ map[y][x]='.'; if(x!==x2) x+=dx; if(y!==y2) y+=dy }
+  map[y2][x2]='.';
+}
+
+/* ----- FOV (simple Shadowcasting-like radius) ----- */
+function computeFOV(map, px, py, radius=6){
+  const vis = Array.from({length:MAP_H}, ()=>Array.from({length:MAP_W}, ()=>false));
+  for(let y=Math.max(0,py-radius); y<=Math.min(MAP_H-1, py+radius); y++){
+    for(let x=Math.max(0,px-radius); x<=Math.min(MAP_W-1, px+radius); x++){
+      const dx = x-px, dy = y-py; if(dx*dx+dy*dy > radius*radius) continue;
+      if(hasLineOfSight(map, px, py, x, y)) vis[y][x]=true;
+    }
+  }
+  return vis;
+}
+function hasLineOfSight(map, x0,y0, x1,y1){
+  // Bresenham
+  let dx = Math.abs(x1-x0), sx = x0<x1?1:-1;
+  let dy = -Math.abs(y1-y0), sy = y0<y1?1:-1;
+  let err = dx+dy;
+  while(true){ if(map[y0][x0]==='#' && !(x0===x1 && y0===y1)) return false; if(x0===x1 && y0===y1) break; let e2=2*err; if(e2>=dy){ err+=dy; x0+=sx } if(e2<=dx){ err+=dx; y0+=sy } }
+  return true;
+}
+
+/* ----- ENTITY & GAME STATE ----- */
+class Entity{constructor(x,y,ch,color,name){this.x=x;this.y=y;this.ch=ch;this.color=color;this.name=name;this.hp=10;this.maxHp=10;this.attack=3}}
+
+let state = {
+  rng: new RNG(12345),
+  map: null,
+  rooms: [],
+  player: null,
+  enemies: [],
+  items: [],
+  fovOn: true,
+  visible: null,
+  messages: [],
+  turn: 0,
+  seed: 12345,
+  level:1,
+}
+
+function newGame(seed=null){
+  state.seed = seed === null ? Date.now() : seed;
+  state.rng = new RNG(state.seed);
+  const generated = generateMap(state.rng);
+  state.map = generated.map;
+  state.rooms = generated.rooms;
+  // place player in center of first room
+  const start = state.rooms[0].center;
+  state.player = new Entity(start[0], start[1], '@', '#ffd166', 'Player');
+  state.player.hp = 20; state.player.maxHp=20; state.player.attack=4;
+  // place enemies
+  state.enemies = [];
+  for(let i=0;i<MAX_ENEMIES;i++){
+    const r = state.rooms[state.rng.nextInt(0, state.rooms.length-1)];
+    const x = state.rng.nextInt(r.x, r.x + r.w -1);
+    const y = state.rng.nextInt(r.y, r.y + r.h -1);
+    if(canPlace(x,y)) state.enemies.push(new Entity(x,y,'g','#ef476f','Goblin'));
+  }
+  // items
+  state.items = [];
+  for(let i=0;i<MAX_ITEMS;i++){
+    const r = state.rooms[state.rng.nextInt(0, state.rooms.length-1)];
+    const x = state.rng.nextInt(r.x, r.x + r.w -1);
+    const y = state.rng.nextInt(r.y, r.y + r.h -1);
+    if(canPlace(x,y)) state.items.push({x,y,type:'potion'});
+  }
+  state.turn = 0; state.messages=[]; state.level=1;
+  pushMessage(`New game (seed: ${state.seed})`);
+  recomputeVisibility(); draw();
+}
+
+function canPlace(x,y){ if(state.map[y][x]==='.' && !(x===state.player?.x && y===state.player?.y)){
+  for(const e of state.enemies) if(e.x===x && e.y===y) return false;
+  for(const it of state.items) if(it.x===x && it.y===y) return false;
+  return true;} return false }
+
+function pushMessage(m){ state.messages.unshift(m); if(state.messages.length>100) state.messages.pop(); document.getElementById('logText').textContent = state.messages.join('\n'); }
+
+/* ----- INPUT & GAME LOOP ----- */
+window.addEventListener('keydown', e=>{
+  const k = e.key;
+  const dir = keyToDir(k);
+  if(dir){ e.preventDefault(); playerMove(dir[0],dir[1]); }
+});
+
+function keyToDir(k){ if(k==='ArrowUp' || k==='w' || k==='W') return [0,-1];
+  if(k==='ArrowDown' || k==='s' || k==='S') return [0,1];
+  if(k==='ArrowLeft' || k==='a' || k==='A') return [-1,0];
+  if(k==='ArrowRight' || k==='d' || k==='D') return [1,0];
+  return null }
+
+function playerMove(dx,dy){
+  const nx = state.player.x + dx, ny = state.player.y + dy;
+  if(nx<0||nx>=MAP_W||ny<0||ny>=MAP_H) return;
+  if(state.map[ny][nx]==='#'){ pushMessage('You bump into a wall.'); return }
+  // check enemy
+  const target = state.enemies.find(e=>e.x===nx && e.y===ny);
+  if(target){ attack(state.player, target); if(target.hp<=0){ pushMessage(`You slay the ${target.name}!`); state.enemies = state.enemies.filter(e=>e!==target); state.level += 0.1; } else pushMessage(`You hit the ${target.name} for ${state.player.attack} dmg.`); }
+  else{
+    state.player.x = nx; state.player.y = ny; // pickup
+    const itmIndex = state.items.findIndex(it=>it.x===nx && it.y===ny);
+    if(itmIndex>=0){ const it = state.items.splice(itmIndex,1)[0]; if(it.type==='potion'){ state.player.hp = Math.min(state.player.maxHp, state.player.hp+8); pushMessage('You drink a potion and heal 8 HP.'); } }
+  }
+  // enemies take turn
+  enemiesTurn();
+  recomputeVisibility(); draw(); state.turn++;
+  checkWinLose();
+}
+
+function attack(att, def){ def.hp -= att.attack; }
+
+function enemiesTurn(){
+  for(const e of state.enemies){
+    // simple AI: move towards player if visible, else wander
+    const vis = state.visible && state.visible[e.y] && state.visible[e.y][e.x];
+    if(vis){ const dx = Math.sign(state.player.x - e.x); const dy = Math.sign(state.player.y - e.y);
+      const nx = e.x + dx, ny = e.y + dy;
+      if(state.player.x===nx && state.player.y===ny){ attack(e, state.player); pushMessage(`${e.name} hits you for ${e.attack} dmg.`); if(state.player.hp<=0) pushMessage('You died...'); }
+      else if(state.map[ny][nx]==='.' && !entityAt(nx,ny)) { e.x=nx; e.y=ny; }
+    } else { // random step
+      const dx = state.rng.nextInt(-1,1); const dy = state.rng.nextInt(-1,1);
+      const nx = e.x + dx, ny = e.y + dy;
+      if(nx>=0 && nx<MAP_W && ny>=0 && ny<MAP_H && state.map[ny][nx]==='.' && !entityAt(nx,ny)) { e.x=nx; e.y=ny; }
+    }
+  }
+}
+function entityAt(x,y){ if(state.player.x===x && state.player.y===y) return state.player; for(const e of state.enemies) if(e.x===x && e.y===y) return e; return null }
+
+function checkWinLose(){ if(state.player.hp<=0){ pushMessage('Game over. Press New Game to try again.'); }
+  if(state.level>=5){ pushMessage('You feel powerful... You win!'); }
+}
+
+/* ----- RENDER ----- */
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+canvas.width = MAP_W * TILE_SIZE; canvas.height = MAP_H * TILE_SIZE;
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  // draw map
+  for(let y=0;y<MAP_H;y++){
+    for(let x=0;x<MAP_W;x++){
+      const visible = state.visible ? state.visible[y][x] : true;
+      const tile = state.map[y][x];
+      if(state.fovOn && !visible){ ctx.fillStyle = '#02040a'; ctx.fillRect(x*TILE_SIZE,y*TILE_SIZE,TILE_SIZE,TILE_SIZE); continue }
+      if(tile==='#'){ ctx.fillStyle = '#101820'; ctx.fillRect(x*TILE_SIZE,y*TILE_SIZE,TILE_SIZE,TILE_SIZE); drawText(x,y,'#'); }
+      else { ctx.fillStyle = '#0b2030'; ctx.fillRect(x*TILE_SIZE,y*TILE_SIZE,TILE_SIZE,TILE_SIZE); }
+    }
+  }
+  // items
+  for(const it of state.items){ if(!state.fovOn || state.visible[it.y][it.x]) drawGlyph(it.x,it.y,'!', '#06d6a0'); }
+  // enemies
+  for(const e of state.enemies){ if(!state.fovOn || state.visible[e.y][e.x]) drawGlyph(e.x,e.y,'g', e.color); }
+  // player
+  drawGlyph(state.player.x, state.player.y, state.player.ch, state.player.color);
+  // HUD
+  const statText = `HP: ${state.player.hp}/${state.player.maxHp}\nTurn: ${state.turn}\nSeed: ${state.seed}\nLevel progress: ${Math.floor((state.level-1)*100)}%`;
+  document.getElementById('statText').textContent = statText;
+}
+function drawGlyph(x,y,ch,color){ ctx.fillStyle = color; ctx.font = "14px monospace"; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(ch, x*TILE_SIZE + TILE_SIZE/2, y*TILE_SIZE + TILE_SIZE/2); }
+function drawText(x,y,str){ ctx.fillStyle = '#3b4752'; ctx.font = "12px monospace"; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(str, x*TILE_SIZE + TILE_SIZE/2, y*TILE_SIZE + TILE_SIZE/2); }
+
+function recomputeVisibility(){ if(!state.fovOn){ state.visible = Array.from({length:MAP_H}, ()=>Array.from({length:MAP_W}, ()=>true)); return }
+  state.visible = computeFOV(state.map, state.player.x, state.player.y, 7);
+}
+
+/* ----- UI buttons ----- */
+document.getElementById('newBtn').addEventListener('click', ()=>newGame());
+document.getElementById('seedBtn').addEventListener('click', ()=>{ newGame(Date.now()); });
+document.getElementById('toggleFov').addEventListener('click', ()=>{ state.fovOn = !state.fovOn; recomputeVisibility(); draw(); pushMessage(`FOV ${state.fovOn? 'on':'off'}`); });
+document.getElementById('saveBtn').addEventListener('click', ()=>{ try{localStorage.setItem('miniRogueSave', JSON.stringify(state)); pushMessage('Saved to localStorage'); }catch(e){pushMessage('Save failed');}});
+
+/* ----- Boot ----- */
+newGame();
+
+</script>
+</body>
+</html>
