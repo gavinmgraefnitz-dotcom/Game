@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="UTF-8">
-    <title>Clicker Game</title>
+    <title>Clicker Game with Shop</title>
   </head>
 <body>
   <h1>Clicker Game</h1>
@@ -10,24 +10,39 @@
   <p id="timer">Time left: 10</p>
   <button id="clickBtn">Click Me!</button>
   <button id="restartBtn" style="display:none;">Restart</button>
-  
+
+  <h2>Shop</h2>
+  <button id="buyDouble">Buy Double Points (Cost: 50)</button>
+  <button id="buyAuto">Buy Auto Clicker (Cost: 100)</button>
+
 <script>
   let countdown;
   let timeLeft = 10;
   let score = 0;
+  let pointsPerClick = 1;
+
+  // Upgrade levels
+  let doublePointsLevel = 0;
+  let autoClickerLevel = 0;
+
+  // Upgrade costs
+  let doublePointsCost = 50;
+  let autoClickerCost = 100;
 
   const timerDisplay = document.getElementById("timer");
   const scoreDisplay = document.getElementById("score");
   const clickBtn = document.getElementById("clickBtn");
   const restartBtn = document.getElementById("restartBtn");
+  const buyDoubleBtn = document.getElementById("buyDouble");
+  const buyAutoBtn = document.getElementById("buyAuto");
 
   // Handle clicks
   clickBtn.addEventListener("click", () => {
-    score++;
+    score += pointsPerClick;
     scoreDisplay.textContent = "Score: " + score;
   });
 
-  // Start the game timer
+  // Timer
   countdown = startTimer();
 
   // Restart button logic
@@ -38,9 +53,41 @@
     scoreDisplay.textContent = "Score: " + score;
     timerDisplay.textContent = "Time left: " + timeLeft;
     clickBtn.disabled = false;
-    clearInterval(countdown); // stop old timer
-    countdown = startTimer(); // start fresh timer
+    clearInterval(countdown);
+    countdown = startTimer();
   });
+
+  // Shop: Double Points
+  buyDoubleBtn.addEventListener("click", () => {
+    if (score >= doublePointsCost) {
+      score -= doublePointsCost;
+      doublePointsLevel++;
+      pointsPerClick *= 2; // effect stacks
+      doublePointsCost = Math.floor(doublePointsCost * 1.5); // cost grows
+      updateDisplay();
+    }
+  });
+
+  // Shop: Auto Clicker
+  buyAutoBtn.addEventListener("click", () => {
+    if (score >= autoClickerCost) {
+      score -= autoClickerCost;
+      autoClickerLevel++;
+      setInterval(() => {
+        score += pointsPerClick;
+        scoreDisplay.textContent = "Score: " + score;
+      }, 1000); // each purchase adds another auto clicker
+      autoClickerCost = Math.floor(autoClickerCost * 1.5); // cost grows
+      updateDisplay();
+    }
+  });
+
+  // Update shop + score display
+  function updateDisplay() {
+    scoreDisplay.textContent = "Score: " + score;
+    buyDoubleBtn.textContent = "Buy Double Points (Cost: " + doublePointsCost + ")";
+    buyAutoBtn.textContent = "Buy Auto Clicker (Cost: " + autoClickerCost + ")";
+  }
 
   // Timer function
   function startTimer() {
@@ -49,7 +96,7 @@
       timerDisplay.textContent = "Time left: " + timeLeft;
 
       if (timeLeft <= 0) {
-        restartBtn.style.display= "inline-block";
+        restartBtn.style.display = "inline-block";
         clearInterval(countdown);
         clickBtn.disabled = true;
         alert("Game Over! Final Score: " + score);
