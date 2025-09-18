@@ -2,185 +2,159 @@
 <html>
   <head>
     <meta charset="UTF-8">
-    <title>Resource Clicker Game</title>
+    <title>Clicker Game with Progressive Shop</title>
     <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+      }
+      #resources {
+        margin-bottom: 20px;
+      }
+      #shop {
+        position: fixed;
+        right: 20px;
+        top: 20px;
+        width: 260px;
+        padding: 15px;
+        border: 2px solid #333;
+        border-radius: 10px;
+        background: #f9f9f9;
+        box-shadow: 2px 2px 10px rgba(0,0,0,0.2);
+      }
+      #shop h2 {
+        margin-top: 0;
+      }
+      button {
+        display: block;
+        margin: 6px 0;
+        padding: 8px;
+        width: 100%;
+        border-radius: 6px;
+        border: 1px solid #333;
+        background: #eee;
+        cursor: pointer;
+      }
       button:disabled {
         background-color: #888;
         color: #ccc;
         cursor: not-allowed;
       }
-
-      /* Tooltip box */
-      #tooltip {
-        position: absolute;
-        background: #333;
-        color: #fff;
-        padding: 6px 10px;
-        border-radius: 8px;
-        font-size: 14px;
-        display: none;
-        pointer-events: none;
-        z-index: 1000;
-        max-width: 200px;
+      .placeholder {
+        background: #ddd;
+        color: #777;
+        font-style: italic;
       }
     </style>
   </head>
   <body>
-    <h1>Resource Clicker Game</h1>
-    <p id="wood">Wood: 0</p>
-    <p id="stone">Stone: 0</p>
+    <h1>Clicker Game</h1>
 
-    <button id="gatherWoodBtn">Chop Wood</button>
-    <button id="gatherStoneBtn" style="display:none;">Mine Stone</button>
+    <div id="resources">
+      <p id="woodDisplay">Wood: 0</p>
+      <p id="stoneDisplay">Stone: 0</p>
+    </div>
 
-    <h2>Shop</h2>
-    <div id="shop"></div>
+    <button id="woodBtn">Chop Wood</button>
+    <button id="stoneBtn" style="display:none;">Mine Stone</button>
 
-    <!-- Floating tooltip -->
-    <div id="tooltip"></div>
+    <div id="shop">
+      <h2>Shop</h2>
+      <div id="shopUpgrades"></div>
+    </div>
 
     <script>
       let wood = 0;
       let stone = 0;
+      let clickPowerWood = 1;
+      let clickPowerStone = 1;
       let stoneUnlocked = false;
 
-      // Define upgrades
-      const upgrades = [
-        { id: "pickaxe", baseName: "Pickaxe", cost: { wood: 1000 }, baseEffect: "Unlock Stone", purchased: false, unlocksStone: true, tooltip: "Allows you to mine stone by unlocking the stone button." },
-        { id: "axe", baseName: "Axe Upgrade", cost: { wood: 50 }, baseEffect: "+1 Wood", repeatable: true, costMultiplier: 1.5, level: 0, tooltip: "Each level adds +1 wood per click." },
-        { id: "quarry", baseName: "Quarry", cost: { stone: 100 }, baseEffect: "+5 Stone", repeatable: true, costMultiplier: 2.1, level: 0, tooltip: "Each level increases stone gathered per click by +5." },
-        { id: "mineShafts", baseName: "Mine Shafts", cost: { stone: 500 }, baseEffect: "+10 Stone/sec", repeatable: true, costMultiplier: 2.1, level: 0, auto: { stone: 10 }, tooltip: "Each level adds an auto-clicker generating +10 stone per second." },
-        { id: "factories", baseName: "Factories", cost: { wood: 1000, stone: 1000 }, baseEffect: "+50 Wood & Stone/sec", repeatable: true, costMultiplier: 2.1, level: 0, auto: { wood: 50, stone: 50 }, tooltip: "Each level adds an auto-clicker generating +50 wood and +50 stone per second." }
+      const woodDisplay = document.getElementById("woodDisplay");
+      const stoneDisplay = document.getElementById("stoneDisplay");
+      const woodBtn = document.getElementById("woodBtn");
+      const stoneBtn = document.getElementById("stoneBtn");
+      const shopDiv = document.getElementById("shopUpgrades");
+
+      // Define upgrades in order
+      let upgrades = [
+        { name: "Pickaxe", cost: { wood: 1000 }, effect: () => { stoneUnlocked = true; stoneBtn.style.display = "inline-block"; }, purchased: false, visible: false },
+        { name: "Stone Axe", cost: { stone: 500 }, effect: () => { clickPowerWood += 2; }, purchased: false, visible: false },
+        { name: "Better Tools", cost: { wood: 2000, stone: 1000 }, effect: () => { clickPowerWood += 5; clickPowerStone += 5; }, purchased: false, visible: false },
+        { name: "Advanced Tools", cost: { wood: 5000, stone: 2500 }, effect: () => { clickPowerWood += 10; clickPowerStone += 10; }, purchased: false, visible: false },
+        { name: "Master Tools", cost: { wood: 10000, stone: 5000 }, effect: () => { clickPowerWood += 20; clickPowerStone += 20; }, purchased: false, visible: false },
+        { name: "Factories", cost: { wood: 20000, stone: 15000 }, effect: () => { setInterval(() => { wood += 50; stone += 50; updateResources(); }, 1000); }, purchased: false, visible: false },
       ];
 
-      const woodDisplay = document.getElementById("wood");
-      const stoneDisplay = document.getElementById("stone");
-      const gatherWoodBtn = document.getElementById("gatherWoodBtn");
-      const gatherStoneBtn = document.getElementById("gatherStoneBtn");
-      const shopDiv = document.getElementById("shop");
-      const tooltip = document.getElementById("tooltip");
-
-      // Click actions
-      gatherWoodBtn.addEventListener("click", () => {
-        let axeLevel = getUpgradeLevel("axe");
-        wood += 1 + axeLevel;
-        updateDisplay();
+      // Clicking resources
+      woodBtn.addEventListener("click", () => {
+        wood += clickPowerWood;
+        updateResources();
       });
 
-      gatherStoneBtn.addEventListener("click", () => {
-        let quarryLevel = getUpgradeLevel("quarry");
-        stone += 1 + (quarryLevel * 5);
-        updateDisplay();
+      stoneBtn.addEventListener("click", () => {
+        stone += clickPowerStone;
+        updateResources();
       });
 
-      function getUpgradeLevel(id) {
-        const upg = upgrades.find(u => u.id === id);
-        return upg ? upg.level : 0;
-      }
-
-      // Shop logic
-      function renderShop() {
-        shopDiv.innerHTML = "";
-        upgrades.forEach(upg => {
-          if (upg.unlocksStone && !stoneUnlocked) {
-            let affordable = wood >= upg.cost.wood;
-            if (affordable) createUpgradeButton(upg);
-          } else {
-            let visible = true;
-            if (!stoneUnlocked && upg.cost.stone) visible = false;
-            if (upg.cost.wood && upg.cost.wood > wood * 10) visible = false;
-            if (upg.cost.stone && upg.cost.stone > stone * 10) visible = false;
-
-            if (visible) createUpgradeButton(upg);
-          }
-        });
-      }
-
-      function createUpgradeButton(upg) {
-        const btn = document.createElement("button");
-        btn.textContent = formatUpgradeText(upg);
-        btn.disabled = !canAfford(upg);
-
-        // Tooltip handlers
-        btn.addEventListener("mouseover", (e) => showTooltip(upg.tooltip, e));
-        btn.addEventListener("mousemove", (e) => moveTooltip(e));
-        btn.addEventListener("mouseout", hideTooltip);
-
-        btn.addEventListener("click", () => purchaseUpgrade(upg));
-
-        shopDiv.appendChild(btn);
-      }
-
-      function formatUpgradeText(upg) {
-        if (upg.purchased && !upg.repeatable) {
-          return `${upg.baseName} (Purchased)`;
-        }
-        let costText = [];
-        if (upg.cost.wood) costText.push(`Wood: ${upg.cost.wood}`);
-        if (upg.cost.stone) costText.push(`Stone: ${upg.cost.stone}`);
-        let effect = upg.baseEffect;
-        if (upg.repeatable && upg.level > 0) {
-          if (upg.id === "mineShafts") effect = `+${10 * (upg.level + 1)} Stone/sec`;
-          if (upg.id === "factories") effect = `+${50 * (upg.level + 1)} Wood & Stone/sec`;
-          if (upg.id === "axe") effect = `+${1 * (upg.level + 1)} Wood`;
-          if (upg.id === "quarry") effect = `+${5 * (upg.level + 1)} Stone`;
-        }
-        return `${upg.baseName} (${effect}) (Cost: ${costText.join(", ")})` +
-               (upg.repeatable ? ` [Level: ${upg.level}]` : "");
-      }
-
-      function canAfford(upg) {
-        return (!upg.cost.wood || wood >= upg.cost.wood) &&
-               (!upg.cost.stone || stone >= upg.cost.stone);
-      }
-
-      function purchaseUpgrade(upg) {
-        if (!canAfford(upg)) return;
-        if (upg.cost.wood) wood -= upg.cost.wood;
-        if (upg.cost.stone) stone -= upg.cost.stone;
-        if (upg.unlocksStone) {
-          stoneUnlocked = true;
-          gatherStoneBtn.style.display = "inline-block";
-          upg.purchased = true;
-        }
-        if (upg.repeatable) {
-          upg.level++;
-          if (upg.auto) {
-            if (upg.auto.wood) setInterval(() => { wood += upg.auto.wood; updateDisplay(); }, 1000);
-            if (upg.auto.stone) setInterval(() => { stone += upg.auto.stone; updateDisplay(); }, 1000);
-          }
-          if (upg.costMultiplier) {
-            if (upg.cost.wood) upg.cost.wood = Math.floor(upg.cost.wood * upg.costMultiplier);
-            if (upg.cost.stone) upg.cost.stone = Math.floor(upg.cost.stone * upg.costMultiplier);
-          }
-        } else {
-          upg.purchased = true;
-        }
-        updateDisplay();
-      }
-
-      function updateDisplay() {
+      // Update resource display
+      function updateResources() {
         woodDisplay.textContent = "Wood: " + wood;
         stoneDisplay.textContent = "Stone: " + stone;
         renderShop();
       }
 
-      // Tooltip functions
-      function showTooltip(text, e) {
-        tooltip.textContent = text;
-        tooltip.style.display = "block";
-        moveTooltip(e);
-      }
-      function moveTooltip(e) {
-        tooltip.style.left = (e.pageX + 15) + "px";
-        tooltip.style.top = (e.pageY + 15) + "px";
-      }
-      function hideTooltip() {
-        tooltip.style.display = "none";
+      // Render shop with progression system
+      function renderShop() {
+        shopDiv.innerHTML = "";
+        let firstHiddenShown = false;
+
+        upgrades.forEach((upg, index) => {
+          if (upg.purchased) {
+            let btn = document.createElement("button");
+            btn.textContent = upg.name + " (Purchased)";
+            btn.disabled = true;
+            shopDiv.appendChild(btn);
+          } else if (upg.visible) {
+            let affordable = (upg.cost.wood || 0) <= wood && (upg.cost.stone || 0) <= stone;
+            let btn = document.createElement("button");
+            btn.textContent = `${upg.name} (Cost: ${upg.cost.wood || 0} wood, ${upg.cost.stone || 0} stone)`;
+            btn.disabled = !affordable;
+            btn.addEventListener("click", () => purchaseUpgrade(upg));
+            shopDiv.appendChild(btn);
+          } else if (!firstHiddenShown) {
+            // Show only the next hidden upgrade as a placeholder
+            let btn = document.createElement("button");
+            btn.textContent = "??? (Locked)";
+            btn.disabled = true;
+            btn.classList.add("placeholder");
+            shopDiv.appendChild(btn);
+            firstHiddenShown = true;
+          }
+        });
       }
 
-      // Start
-      updateDisplay();
+      // Purchase upgrade
+      function purchaseUpgrade(upg) {
+        if (wood >= (upg.cost.wood || 0) && stone >= (upg.cost.stone || 0)) {
+          wood -= (upg.cost.wood || 0);
+          stone -= (upg.cost.stone || 0);
+          upg.effect();
+          upg.purchased = true;
+
+          // Unlock next upgrade in the chain
+          let nextIndex = upgrades.indexOf(upg) + 1;
+          if (nextIndex < upgrades.length) {
+            upgrades[nextIndex].visible = true;
+          }
+
+          updateResources();
+        }
+      }
+
+      // Start game
+      upgrades[0].visible = true; // first upgrade available
+      updateResources();
     </script>
   </body>
 </html>
