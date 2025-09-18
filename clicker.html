@@ -2,107 +2,185 @@
 <html>
   <head>
     <meta charset="UTF-8">
-    <title>Clicker Game with Shop</title>
-  </head>
-<body>
-  <h1>Clicker Game</h1>
-  <p id="score">Score: 0</p>
-  <p id="timer">Time left: 10</p>
-  <button id="clickBtn">Click Me!</button>
-  <button id="restartBtn" style="display:none;">Restart</button>
-
-  <h2>Shop</h2>
-  <button id="buyDouble">Buy Double Points (Cost: 50)</button>
-  <button id="buyAuto">Buy Auto Clicker (Cost: 100)</button>
-
-<script>
-  let countdown;
-  let timeLeft = 10;
-  let score = 0;
-  let pointsPerClick = 1;
-
-  // Upgrade levels
-  let doublePointsLevel = 0;
-  let autoClickerLevel = 0;
-
-  // Upgrade costs
-  let doublePointsCost = 50;
-  let autoClickerCost = 100;
-
-  const timerDisplay = document.getElementById("timer");
-  const scoreDisplay = document.getElementById("score");
-  const clickBtn = document.getElementById("clickBtn");
-  const restartBtn = document.getElementById("restartBtn");
-  const buyDoubleBtn = document.getElementById("buyDouble");
-  const buyAutoBtn = document.getElementById("buyAuto");
-
-  // Handle clicks
-  clickBtn.addEventListener("click", () => {
-    score += pointsPerClick;
-    scoreDisplay.textContent = "Score: " + score;
-  });
-
-  // Timer
-  countdown = startTimer();
-
-  // Restart button logic
-  restartBtn.addEventListener("click", () => { 
-    restartBtn.style.display = "none";
-    score = 0;
-    timeLeft = 10;
-    scoreDisplay.textContent = "Score: " + score;
-    timerDisplay.textContent = "Time left: " + timeLeft;
-    clickBtn.disabled = false;
-    clearInterval(countdown);
-    countdown = startTimer();
-  });
-
-  // Shop: Double Points
-  buyDoubleBtn.addEventListener("click", () => {
-    if (score >= doublePointsCost) {
-      score -= doublePointsCost;
-      doublePointsLevel++;
-      pointsPerClick *= 2; // effect stacks
-      doublePointsCost = Math.floor(doublePointsCost * 1.5); // cost grows
-      updateDisplay();
-    }
-  });
-
-  // Shop: Auto Clicker
-  buyAutoBtn.addEventListener("click", () => {
-    if (score >= autoClickerCost) {
-      score -= autoClickerCost;
-      autoClickerLevel++;
-      setInterval(() => {
-        score += pointsPerClick;
-        scoreDisplay.textContent = "Score: " + score;
-      }, 1000); // each purchase adds another auto clicker
-      autoClickerCost = Math.floor(autoClickerCost * 1.5); // cost grows
-      updateDisplay();
-    }
-  });
-
-  // Update shop + score display
-  function updateDisplay() {
-    scoreDisplay.textContent = "Score: " + score;
-    buyDoubleBtn.textContent = "Buy Double Points (Cost: " + doublePointsCost + ")";
-    buyAutoBtn.textContent = "Buy Auto Clicker (Cost: " + autoClickerCost + ")";
-  }
-
-  // Timer function
-  function startTimer() {
-    return setInterval(() => {
-      timeLeft--;
-      timerDisplay.textContent = "Time left: " + timeLeft;
-
-      if (timeLeft <= 0) {
-        restartBtn.style.display = "inline-block";
-        clearInterval(countdown);
-        clickBtn.disabled = true;
-        alert("Game Over! Final Score: " + score);
+    <title>Resource Clicker Game</title>
+    <style>
+      button:disabled {
+        background-color: #888;
+        color: #ccc;
+        cursor: not-allowed;
       }
-    }, 1000);
-  }
-</script>
-</body>
+
+      /* Tooltip box */
+      #tooltip {
+        position: absolute;
+        background: #333;
+        color: #fff;
+        padding: 6px 10px;
+        border-radius: 8px;
+        font-size: 14px;
+        display: none;
+        pointer-events: none;
+        z-index: 1000;
+        max-width: 200px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Resource Clicker Game</h1>
+    <p id="wood">Wood: 0</p>
+    <p id="stone">Stone: 0</p>
+
+    <button id="gatherWoodBtn">Chop Wood</button>
+    <button id="gatherStoneBtn" style="display:none;">Mine Stone</button>
+
+    <h2>Shop</h2>
+    <div id="shop"></div>
+
+    <!-- Floating tooltip -->
+    <div id="tooltip"></div>
+
+    <script>
+      let wood = 0;
+      let stone = 0;
+      let stoneUnlocked = false;
+
+      // Define upgrades
+      const upgrades = [
+        { id: "pickaxe", baseName: "Pickaxe", cost: { wood: 1000 }, baseEffect: "Unlock Stone", purchased: false, unlocksStone: true, tooltip: "Allows you to mine stone by unlocking the stone button." },
+        { id: "axe", baseName: "Axe Upgrade", cost: { wood: 50 }, baseEffect: "+1 Wood", repeatable: true, costMultiplier: 1.5, level: 0, tooltip: "Each level adds +1 wood per click." },
+        { id: "quarry", baseName: "Quarry", cost: { stone: 100 }, baseEffect: "+5 Stone", repeatable: true, costMultiplier: 2.1, level: 0, tooltip: "Each level increases stone gathered per click by +5." },
+        { id: "mineShafts", baseName: "Mine Shafts", cost: { stone: 500 }, baseEffect: "+10 Stone/sec", repeatable: true, costMultiplier: 2.1, level: 0, auto: { stone: 10 }, tooltip: "Each level adds an auto-clicker generating +10 stone per second." },
+        { id: "factories", baseName: "Factories", cost: { wood: 1000, stone: 1000 }, baseEffect: "+50 Wood & Stone/sec", repeatable: true, costMultiplier: 2.1, level: 0, auto: { wood: 50, stone: 50 }, tooltip: "Each level adds an auto-clicker generating +50 wood and +50 stone per second." }
+      ];
+
+      const woodDisplay = document.getElementById("wood");
+      const stoneDisplay = document.getElementById("stone");
+      const gatherWoodBtn = document.getElementById("gatherWoodBtn");
+      const gatherStoneBtn = document.getElementById("gatherStoneBtn");
+      const shopDiv = document.getElementById("shop");
+      const tooltip = document.getElementById("tooltip");
+
+      // Click actions
+      gatherWoodBtn.addEventListener("click", () => {
+        let axeLevel = getUpgradeLevel("axe");
+        wood += 1 + axeLevel;
+        updateDisplay();
+      });
+
+      gatherStoneBtn.addEventListener("click", () => {
+        let quarryLevel = getUpgradeLevel("quarry");
+        stone += 1 + (quarryLevel * 5);
+        updateDisplay();
+      });
+
+      function getUpgradeLevel(id) {
+        const upg = upgrades.find(u => u.id === id);
+        return upg ? upg.level : 0;
+      }
+
+      // Shop logic
+      function renderShop() {
+        shopDiv.innerHTML = "";
+        upgrades.forEach(upg => {
+          if (upg.unlocksStone && !stoneUnlocked) {
+            let affordable = wood >= upg.cost.wood;
+            if (affordable) createUpgradeButton(upg);
+          } else {
+            let visible = true;
+            if (!stoneUnlocked && upg.cost.stone) visible = false;
+            if (upg.cost.wood && upg.cost.wood > wood * 10) visible = false;
+            if (upg.cost.stone && upg.cost.stone > stone * 10) visible = false;
+
+            if (visible) createUpgradeButton(upg);
+          }
+        });
+      }
+
+      function createUpgradeButton(upg) {
+        const btn = document.createElement("button");
+        btn.textContent = formatUpgradeText(upg);
+        btn.disabled = !canAfford(upg);
+
+        // Tooltip handlers
+        btn.addEventListener("mouseover", (e) => showTooltip(upg.tooltip, e));
+        btn.addEventListener("mousemove", (e) => moveTooltip(e));
+        btn.addEventListener("mouseout", hideTooltip);
+
+        btn.addEventListener("click", () => purchaseUpgrade(upg));
+
+        shopDiv.appendChild(btn);
+      }
+
+      function formatUpgradeText(upg) {
+        if (upg.purchased && !upg.repeatable) {
+          return `${upg.baseName} (Purchased)`;
+        }
+        let costText = [];
+        if (upg.cost.wood) costText.push(`Wood: ${upg.cost.wood}`);
+        if (upg.cost.stone) costText.push(`Stone: ${upg.cost.stone}`);
+        let effect = upg.baseEffect;
+        if (upg.repeatable && upg.level > 0) {
+          if (upg.id === "mineShafts") effect = `+${10 * (upg.level + 1)} Stone/sec`;
+          if (upg.id === "factories") effect = `+${50 * (upg.level + 1)} Wood & Stone/sec`;
+          if (upg.id === "axe") effect = `+${1 * (upg.level + 1)} Wood`;
+          if (upg.id === "quarry") effect = `+${5 * (upg.level + 1)} Stone`;
+        }
+        return `${upg.baseName} (${effect}) (Cost: ${costText.join(", ")})` +
+               (upg.repeatable ? ` [Level: ${upg.level}]` : "");
+      }
+
+      function canAfford(upg) {
+        return (!upg.cost.wood || wood >= upg.cost.wood) &&
+               (!upg.cost.stone || stone >= upg.cost.stone);
+      }
+
+      function purchaseUpgrade(upg) {
+        if (!canAfford(upg)) return;
+        if (upg.cost.wood) wood -= upg.cost.wood;
+        if (upg.cost.stone) stone -= upg.cost.stone;
+        if (upg.unlocksStone) {
+          stoneUnlocked = true;
+          gatherStoneBtn.style.display = "inline-block";
+          upg.purchased = true;
+        }
+        if (upg.repeatable) {
+          upg.level++;
+          if (upg.auto) {
+            if (upg.auto.wood) setInterval(() => { wood += upg.auto.wood; updateDisplay(); }, 1000);
+            if (upg.auto.stone) setInterval(() => { stone += upg.auto.stone; updateDisplay(); }, 1000);
+          }
+          if (upg.costMultiplier) {
+            if (upg.cost.wood) upg.cost.wood = Math.floor(upg.cost.wood * upg.costMultiplier);
+            if (upg.cost.stone) upg.cost.stone = Math.floor(upg.cost.stone * upg.costMultiplier);
+          }
+        } else {
+          upg.purchased = true;
+        }
+        updateDisplay();
+      }
+
+      function updateDisplay() {
+        woodDisplay.textContent = "Wood: " + wood;
+        stoneDisplay.textContent = "Stone: " + stone;
+        renderShop();
+      }
+
+      // Tooltip functions
+      function showTooltip(text, e) {
+        tooltip.textContent = text;
+        tooltip.style.display = "block";
+        moveTooltip(e);
+      }
+      function moveTooltip(e) {
+        tooltip.style.left = (e.pageX + 15) + "px";
+        tooltip.style.top = (e.pageY + 15) + "px";
+      }
+      function hideTooltip() {
+        tooltip.style.display = "none";
+      }
+
+      // Start
+      updateDisplay();
+    </script>
+  </body>
 </html>
