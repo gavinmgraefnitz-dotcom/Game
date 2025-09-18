@@ -1,1 +1,61 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title>Clicker Game</title>
+  </head>
+<body>
+  <h1>Clicker Game</h1>
+  <p id="score">Score: 0</p>
+  <p id="timer">Time left: 10</p>
+  <button id="clickBtn">Click Me!</button>
+  <button id="restartBtn" style="display:none;">Restart</button>
+  
+<script>
+  let countdown;
+  let timeLeft = 10;
+  let score = 0;
 
+  const timerDisplay = document.getElementById("timer");
+  const scoreDisplay = document.getElementById("score");
+  const clickBtn = document.getElementById("clickBtn");
+  const restartBtn = document.getElementById("restartBtn");
+
+  // Handle clicks
+  clickBtn.addEventListener("click", () => {
+    score++;
+    scoreDisplay.textContent = "Score: " + score;
+  });
+
+  // Start the game timer
+  countdown = startTimer();
+
+  // Restart button logic
+  restartBtn.addEventListener("click", () => { 
+    restartBtn.style.display = "none";
+    score = 0;
+    timeLeft = 10;
+    scoreDisplay.textContent = "Score: " + score;
+    timerDisplay.textContent = "Time left: " + timeLeft;
+    clickBtn.disabled = false;
+    clearInterval(countdown); // stop old timer
+    countdown = startTimer(); // start fresh timer
+  });
+
+  // Timer function
+  function startTimer() {
+    return setInterval(() => {
+      timeLeft--;
+      timerDisplay.textContent = "Time left: " + timeLeft;
+
+      if (timeLeft <= 0) {
+        restartBtn.style.display= "inline-block";
+        clearInterval(countdown);
+        clickBtn.disabled = true;
+        alert("Game Over! Final Score: " + score);
+      }
+    }, 1000);
+  }
+</script>
+</body>
+</html>
